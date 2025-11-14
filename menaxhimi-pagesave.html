@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="sq">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Menaxhim Pagesash — FINAL SUPER PRO (Albani & Fehimi)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+  body{font-family:Inter,Arial;background:#0b1220;color:#f8fafc;margin:0;padding:20px}
+  .card{background:#111b2a;border-radius:12px;padding:14px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  input,button,select{padding:8px;border-radius:8px;border:1px solid #1e293b;background:#0f172a;color:#fff}
+  .btn{background:#2563eb;border:none;cursor:pointer}
+  .btn-ghost{background:transparent;border:1px solid #2563eb;color:#2563eb}
+  .btn-danger{background:transparent;border:1px solid #ef4444;color:#ef4444}
+  table{width:100%;border-collapse:collapse;margin-top:10px}
+  th,td{border-bottom:1px solid #1e293b;padding:8px;text-align:left}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<h2>Menaxhim Pagesash — FINAL SUPER PRO</h2>
+<div id="loginCard" class="card">
+  <div class="row">
+    <input id="inputUser" placeholder="Username">
+    <input id="inputPass" type="password" placeholder="Password">
+    <button id="btnLogin" class="btn">Hyr</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="card">
+    <div class="row">
+      <select id="selectMonth"></select>
+      <input id="searchClient" placeholder="Kërko klient...">
+    </div>
+  </div>
+
+  <div id="adminControls" class="card hidden">
+    <h3>Admin - Menaxhim</h3>
+    <div class="row">
+      <input id="newName" placeholder="Emër klienti">
+      <input id="newAmount" type="number" value="50">
+      <button id="btnAddClient" class="btn">Shto klient</button>
+      <button id="btnResetAll" class="btn-danger">RESET</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div>
+        <h4>Barazim Alban</h4>
+        <input id="barazoAlb" placeholder="Kodi 1991">
+        <button id="btnBarazoAlb" class="btn">Barazo Alban</button>
+      </div>
+      <div>
+        <h4>Barazim Fehim</h4>
+        <input id="barazoFeh" placeholder="Kodi 2014">
+        <button id="btnBarazoFeh" class="btn">Barazo Fehim</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Klienti</th><th>Shuma (€)</th><th>Statusi</th><th>Veprimi</th></tr></thead>
+      <tbody id="clientsTbody"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <p>Total Alban: <strong id="totalAlb">0</strong> € | Total Fehim: <strong id="totalFeh">0</strong> € | Total Admin: <strong id="totalAdmin">0</strong> €</p>
+    <button id="btnLogout" class="btn-ghost">Dil</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBNAIVqSiYAy-UD-Xazsq8G1-DJjANYWyE",
+  authDomain: "menaxhimi-pagesave.firebaseapp.com",
+  databaseURL: "https://menaxhimi-pagesave-default-rtdb.europe-west1.firebasedatabase.app/",
+  projectId: "menaxhimi-pagesave",
+  storageBucket: "menaxhimi-pagesave.firebasestorage.app",
+  messagingSenderId: "471301400716",
+  appId: "1:471301400716:web:404cdebef74920c0b873a9"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const BARAZO_ALB="1991", BARAZO_FEH="2014";
+const passAdmin="admin123", passAlban="zogaj123", passFehim="fehim123";
+
+let clientsMap = {};
+let meta = { totalAlb:0, totalFeh:0, totalAdmin:0 };
+let currentUser = null;
+
+const loginCard=document.getElementById("loginCard");
+const app=document.getElementById("app");
+const selectMonth=document.getElementById("selectMonth");
+const searchClient=document.getElementById("searchClient");
+const clientsTbody=document.getElementById("clientsTbody");
+const adminControls=document.getElementById("adminControls");
+const newName=document.getElementById("newName");
+const newAmount=document.getElementById("newAmount");
+const totalAlbEl=document.getElementById("totalAlb");
+const totalFehEl=document.getElementById("totalFeh");
+const totalAdminEl=document.getElementById("totalAdmin");
+
+function nowMonth(){return new Date().toLocaleString("default",{month:"long",year:"numeric"})}
+function toNum(x){return typeof x==="number"?x:(parseFloat(x)||0)}
+
+const clientsRef = db.ref('mp_clients');
+const metaRef = db.ref('mp_meta');
+
+metaRef.on('value', snap=>{
+  const v=snap.val();
+  meta=v?v:{ totalAlb:0,totalFeh:0,totalAdmin:0 };
+  updateTotals();
+});
+
+clientsRef.on('child_added', snap=>{
+  const id=snap.key, c=snap.val(); c.id=id; c.shuma=toNum(c.shuma);
+  clientsMap[id]=c; populateMonths(); renderClients();
+});
+clientsRef.on('child_changed', snap=>{
+  const id=snap.key, c=snap.val(); c.id=id; c.shuma=toNum(c.shuma);
+  clientsMap[id]=c; populateMonths(); renderClients();
+});
+clientsRef.on('child_removed', snap=>{
+  delete clientsMap[snap.key]; populateMonths(); renderClients();
+});
+
+function populateMonths(){
+  const set=new Set(Object.values(clientsMap).map(c=>c.muaji)); set.add(nowMonth());
+  const months=[...set];
+  const prev=selectMonth.value||nowMonth();
+  selectMonth.innerHTML=months.map(m=>`<option>${m}</option>`).join("");
+  selectMonth.value=months.includes(prev)?prev:nowMonth();
+}
+
+function renderClients(){
+  const mu=selectMonth.value, q=(searchClient.value||"").toLowerCase();
+  clientsTbody.innerHTML="";
+  Object.values(clientsMap)
+    .filter(c=>c.muaji===mu&&c.name.toLowerCase().includes(q))
+    .sort((a,b)=>a.name.localeCompare(b.name))
+    .forEach(c=>{
+      let statusTxt=c.status;
+      if(c.status==="e-paguar"&&c.paguarNga)statusTxt="Paguar nga "+c.paguarNga;
+      if(c.status==="dorëzuar"&&c.paguarNga)statusTxt="Dorëzuar nga "+c.paguarNga;
+      const canPay=currentUser!=="admin"&&c.status==="jo-paguar";
+      const actions=currentUser==="admin"?
+        `<button onclick="markPaid('${c.id}')">E paguar</button><button onclick="delClient('${c.id}')">Fshi</button>`:
+        (canPay?`<button onclick="markPaid('${c.id}')">E paguar</button>`:"");
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${c.name}</td><td>${c.shuma}</td><td>${statusTxt}</td><td>${actions}</td>`;
+      clientsTbody.appendChild(tr);
+    });
+  updateTotals();
+}
+
+function updateTotals(){
+  const mu=selectMonth.value;
+  totalAlbEl.textContent=Object.values(clientsMap).filter(c=>c.muaji===mu&&c.paguarNga==="alban"&&c.status==="e-paguar").reduce((a,b)=>a+b.shuma,0);
+  totalFehEl.textContent=Object.values(clientsMap).filter(c=>c.muaji===mu&&c.paguarNga==="fehim"&&c.status==="e-paguar").reduce((a,b)=>a+b.shuma,0);
+  totalAdminEl.textContent=meta.totalAdmin||0;
+}
+
+window.markPaid=function(id){
+  const c=clientsMap[id];
+  if(!c||c.status!=="jo-paguar"||currentUser==="admin")return;
+  clientsRef.child(id).update({status:"e-paguar",paguarNga:currentUser});
+};
+
+window.delClient=function(id){
+  if(currentUser!=="admin")return;
+  if(confirm("Fshi klientin?")) clientsRef.child(id).remove();
+};
+
+document.getElementById("btnAddClient").onclick=()=>{
+  if(currentUser!=="admin")return;
+  const name=newName.value.trim(), sh=toNum(newAmount.value), mu=selectMonth.value;
+  if(!name)return;
+  clientsRef.push({name,shuma:sh,punetori:"tegjithe",status:"jo-paguar",muaji:mu});
+  newName.value="";
+};
+
+document.getElementById("btnResetAll").onclick=()=>{
+  if(currentUser!=="admin")return;
+  if(confirm("Fshi të gjitha të dhënat?")){
+    clientsRef.remove();
+    metaRef.set({totalAlb:0,totalFeh:0,totalAdmin:0});
+  }
+};
+
+document.getElementById("btnBarazoAlb").onclick=async ()=>{const code=document.getElementById("barazoAlb").value;
+  if(code!==BARAZO_ALB)return alert("Kodi i gabuar");
+  const mu=selectMonth.value; let tot=0; const updates={};
+  Object.values(clientsMap).forEach(c=>{
+    if(c.muaji===mu&&c.paguarNga==="alban"&&c.status==="e-paguar"){
+      updates[c.id]={...c,status:"dorëzuar"};
+      tot+=c.shuma;
+    }
+  });
+  for(const id in updates) await clientsRef.child(id).update(updates[id]);
+  meta.totalAlb+=tot; meta.totalAdmin+=tot; metaRef.set(meta);
+  alert("Barazim Alban: "+tot+"€");
+};
+
+document.getElementById("btnBarazoFeh").onclick=async ()=>{const code=document.getElementById("barazoFeh").value;
+  if(code!==BARAZO_FEH)return alert("Kodi i gabuar");
+  const mu=selectMonth.value; let tot=0; const updates={};
+  Object.values(clientsMap).forEach(c=>{
+    if(c.muaji===mu&&c.paguarNga==="fehim"&&c.status==="e-paguar"){
+      updates[c.id]={...c,status:"dorëzuar"};
+      tot+=c.shuma;
+    }
+  });
+  for(const id in updates) await clientsRef.child(id).update(updates[id]);
+  meta.totalFeh+=tot; meta.totalAdmin+=tot; metaRef.set(meta);
+  alert("Barazim Fehim: "+tot+"€");
+};
+
+document.getElementById("btnLogin").onclick=()=>{
+  const u=inputUser.value.trim(), p=inputPass.value.trim();
+  if(u==="admin"&&p===passAdmin)return login("admin");
+  if(u==="alban"&&p===passAlban)return login("alban");
+  if(u==="fehim"&&p===passFehim)return login("fehim");
+  alert("Gabim!");
+};
+
+function login(u){
+  currentUser=u;
+  loginCard.classList.add("hidden");
+  app.classList.remove("hidden");
+  adminControls.classList.toggle("hidden",u!=="admin");
+  populateMonths(); renderClients();
+}
+
+btnLogout.onclick=()=>{currentUser=null; app.classList.add("hidden"); loginCard.classList.remove("hidden");};
+
+searchClient.oninput=()=>renderClients();
+selectMonth.onchange=()=>renderClients();
+
+clientsRef.once('value').then(s=>{
+  if(!s.exists()){
+    const mu=nowMonth();
+    clientsRef.push({name:"Klienti Shembull 1",shuma:50,punetori:"tegjithe",status:"jo-paguar",muaji:mu});
+    clientsRef.push({name:"Klienti Shembull 2",shuma:70,punetori:"tegjithe",status:"jo-paguar",muaji:mu});
+  }
+});
+metaRef.once('value').then(s=>{if(!s.exists())metaRef.set({totalAlb:0,totalFeh:0,totalAdmin:0})});
+</script>
+</body>
+</html>
